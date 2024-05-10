@@ -62,6 +62,7 @@ import static io.trino.sql.planner.assertions.PlanMatchPattern.exchange;
 import static io.trino.sql.planner.assertions.PlanMatchPattern.node;
 import static io.trino.sql.planner.assertions.PlanMatchPattern.tableScan;
 import static io.trino.testing.TestingConnectorBehavior.SUPPORTS_AGGREGATION_PUSHDOWN;
+import static io.trino.testing.TestingConnectorBehavior.SUPPORTS_JOIN_PUSHDOWN;
 import static io.trino.testing.TestingConnectorBehavior.SUPPORTS_JOIN_PUSHDOWN_WITH_FULL_JOIN;
 import static io.trino.testing.TestingConnectorBehavior.SUPPORTS_LIMIT_PUSHDOWN;
 import static io.trino.testing.TestingConnectorBehavior.SUPPORTS_PREDICATE_PUSHDOWN_WITH_VARCHAR_EQUALITY;
@@ -1011,6 +1012,19 @@ public class TestPostgreSqlConnectorTest
                     // NULL constant value is currently not pushed down
                     .isNotFullyPushedDown(FilterNode.class);
         }
+    }
+
+    @Test
+    public void testJoinWithCastInCriteriaPushdown()
+    {
+        if (!hasBehavior(SUPPORTS_JOIN_PUSHDOWN)) {
+            return;
+        }
+
+        Session session = joinPushdownEnabled(getSession());
+
+        assertThat(query(session, "SELECT c.name, o.orderdate FROM customer c JOIN orders o ON CAST(c.custkey AS varchar(20)) = CAST(o.custkey AS varchar(21))")).isFullyPushedDown();
+        assertThat(query(session, "SELECT c.name, o.orderdate FROM customer c JOIN orders o ON CAST((c.custkey + 123) AS varchar(20)) = CAST(o.custkey AS varchar(21))")).isFullyPushedDown();
     }
 
     @Override

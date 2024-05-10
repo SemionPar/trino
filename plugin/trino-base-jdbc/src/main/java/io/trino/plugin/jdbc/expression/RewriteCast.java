@@ -13,61 +13,65 @@
  */
 package io.trino.plugin.jdbc.expression;
 
-import com.google.common.collect.ImmutableList;
 import io.trino.matching.Capture;
 import io.trino.matching.Captures;
 import io.trino.matching.Pattern;
 import io.trino.plugin.base.expression.ConnectorExpressionRule;
-import io.trino.plugin.jdbc.QueryParameter;
+import io.trino.plugin.jdbc.WriteMapping;
+import io.trino.spi.connector.ConnectorSession;
 import io.trino.spi.expression.Call;
 import io.trino.spi.expression.ConnectorExpression;
 import io.trino.spi.type.Type;
 
-import java.util.List;
 import java.util.Optional;
+import java.util.function.BiFunction;
 
 import static io.trino.matching.Capture.newCapture;
 import static io.trino.plugin.base.expression.ConnectorExpressionPatterns.argument;
+import static io.trino.plugin.base.expression.ConnectorExpressionPatterns.argumentCount;
 import static io.trino.plugin.base.expression.ConnectorExpressionPatterns.call;
 import static io.trino.plugin.base.expression.ConnectorExpressionPatterns.expression;
 import static io.trino.plugin.base.expression.ConnectorExpressionPatterns.functionName;
 import static io.trino.spi.expression.StandardFunctions.CAST_FUNCTION_NAME;
 import static java.lang.String.format;
+import static java.util.Objects.requireNonNull;
 
 public class RewriteCast
         implements ConnectorExpressionRule<Call, ParameterizedExpression>
 {
     private static final Capture<ConnectorExpression> VALUE = newCapture();
-    private static final Capture<List<ConnectorExpression>> EXPRESSIONS = newCapture();
+    private final BiFunction<ConnectorSession, Type, WriteMapping> toWriteMapping;
+
+    public RewriteCast(BiFunction<ConnectorSession, Type, WriteMapping> toWriteMapping)
+    {
+        this.toWriteMapping = requireNonNull(toWriteMapping, "toWriteMapping is null");
+    }
 
     @Override
     public Pattern<Call> getPattern()
     {
         return call()
                 .with(functionName().equalTo(CAST_FUNCTION_NAME))
+                .with(argumentCount().equalTo(1))
                 .with(argument(0).matching(expression().capturedAs(VALUE)));
     }
 
     @Override
     public Optional<ParameterizedExpression> rewrite(Call call, Captures captures, RewriteContext<ParameterizedExpression> context)
     {
-        Type targetType = call.getType();
+        Type trinoType = call.getType();
         ConnectorExpression capturedValue = captures.get(VALUE);
 
         Optional<ParameterizedExpression> value = context.defaultRewrite(capturedValue);
         if (value.isEmpty()) {
-            return Optional.empty();
-        }
-
-        ImmutableList.Builder<QueryParameter> parameters = ImmutableList.builder();
-        Optional<ParameterizedExpression> rewritten = context.defaultRewrite(capturedValue);
-        if (rewritten.isEmpty()) {
             // if argument is a call chain that can't be rewritten, then we can't push it down
             return Optional.empty();
         }
 
+        String targetType = toWriteMapping.apply(context.getSession(), trinoType).getDataType();
+
         return Optional.of(new ParameterizedExpression(
-                format("CAST(%s AS %s)", value.get().expression(), targetType.getDisplayName()),
-                parameters.build()));
+                format("CAST(%s AS %s)", value.get().expression(), targetType),
+                value.get().parameters()));
     }
 }
