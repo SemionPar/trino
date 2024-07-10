@@ -313,7 +313,6 @@ public class PostgreSqlClient
         this.connectorExpressionRewriter = JdbcConnectorExpressionRewriterBuilder.newBuilder()
                 .addStandardRules(this::quoted)
                 .add(new RewriteIn())
-                .add(new RewriteCast(this::toWriteMapping))
                 .withTypeClass("integer_type", ImmutableSet.of("tinyint", "smallint", "integer", "bigint"))
                 .withTypeClass("numeric_type", ImmutableSet.of("tinyint", "smallint", "integer", "bigint", "decimal", "real", "double"))
                 .map("$equal(left, right)").to("left = right")
@@ -346,6 +345,7 @@ public class PostgreSqlClient
                 this.connectorExpressionRewriter,
                 ImmutableSet.<ProjectFunctionRule<JdbcExpression, ParameterizedExpression>>builder()
                         .add(new RewriteStringReverseFunction())
+                        .add(new RewriteCast(this::toWriteMapping))
                         .build());
 
         JdbcTypeHandle bigintTypeHandle = new JdbcTypeHandle(Types.BIGINT, Optional.of("bigint"), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty());
