@@ -24,7 +24,7 @@ import static io.trino.tpch.TpchTable.NATION;
 import static java.lang.String.format;
 import static org.assertj.core.api.Assertions.assertThat;
 
-class TestBigQueryParentProjectId
+class TestBigQueryWithBothProjectIdsSet
         extends BaseBigQueryProjectIdResolution
 {
     @Override
@@ -33,6 +33,7 @@ class TestBigQueryParentProjectId
     {
         queryRunner = BigQueryQueryRunner.builder()
                 .setConnectorProperties(ImmutableMap.<String, String>builder()
+                        .put("bigquery.project-id", projectId)
                         .put("bigquery.parent-project-id", parentProjectId)
                         .buildOrThrow())
                 .setInitialTables(ImmutableList.of(NATION))
@@ -41,7 +42,7 @@ class TestBigQueryParentProjectId
     }
 
     @Test
-    void testQueriesWithParentProjectId()
+    void testQueriesWithBothProjectIdAndParentProjectId()
             throws Exception
     {
         // tpch schema is available in both projects
@@ -55,25 +56,25 @@ class TestBigQueryParentProjectId
         String trinoSchema = "someschema_" + randomNameSuffix();
         try (AutoCloseable ignored = withSchema(trinoSchema); TestTable table = newTrinoTable("%s.table".formatted(trinoSchema), "(col1 INT)")) {
             String tableName = table.getName().split("\\.")[1];
-            // schema created in parentProjectId by default
+            // schema created in projectId is present in projectId and NOT present in parentProjectId
             assertThat(computeActual(format(
                     "SELECT * FROM TABLE(bigquery.system.query(query => 'SELECT schema_name FROM `%s.region-us.INFORMATION_SCHEMA.SCHEMATA`'))",
                     projectId)))
-                    .doesNotContain(row(trinoSchema));
-            // confusion point: this implicitly points to project
-            assertThat(computeActual(format("SELECT * FROM TABLE(bigquery.system.query(query => 'SELECT schema_name FROM INFORMATION_SCHEMA.SCHEMATA'))")))
                     .contains(row(trinoSchema));
+            // confusion point: this implicitly points to parent project
+            assertThat(computeActual(format("SELECT * FROM TABLE(bigquery.system.query(query => 'SELECT schema_name FROM INFORMATION_SCHEMA.SCHEMATA'))")))
+                    .doesNotContain(row(trinoSchema));
             assertThat(computeActual(format(
                     "SELECT * FROM TABLE(bigquery.system.query(query => 'SELECT schema_name FROM `%s.region-us.INFORMATION_SCHEMA.SCHEMATA`'))",
                     parentProjectId)))
-                    .contains(row(trinoSchema));
-            // table created in parentProjectId by default
+                    .doesNotContain(row(trinoSchema));
+            // table created in projectId is present in projectId and NOT present in parentProjectId
             assertThat(computeActual("SHOW TABLES FROM " + trinoSchema).getOnlyColumn()).contains(tableName);
             assertThat(computeActual(format(
                     "SELECT * FROM TABLE(bigquery.system.query(query => 'SELECT table_name FROM `%s.region-us.INFORMATION_SCHEMA.TABLES` WHERE table_schema = \"%s\"'))",
                     projectId,
                     trinoSchema)))
-                    .doesNotContain(row(tableName));
+                    .contains(row(tableName));
             assertThat(query(format(
                     "SELECT * FROM TABLE(bigquery.system.query(query => 'SELECT table_name FROM INFORMATION_SCHEMA.TABLES WHERE table_schema = \"%s\"'))",
                     trinoSchema)))
@@ -83,10 +84,10 @@ class TestBigQueryParentProjectId
                     "SELECT * FROM TABLE(bigquery.system.query(query => 'SELECT table_name FROM `%s.region-us.INFORMATION_SCHEMA.TABLES` WHERE table_schema = \"%s\"'))",
                     parentProjectId,
                     trinoSchema)))
-                    .contains(row(tableName));
+                    .doesNotContain(row(tableName));
             assertThat(query("SELECT * FROM " + table.getName())).returnsEmptyResult();
-            assertThat(query("SELECT * FROM TABLE(bigquery.system.query(query => 'SELECT * FROM `%s.%s`'))".formatted(parentProjectId, table.getName()))).returnsEmptyResult();
-            assertThat(query("SELECT * FROM TABLE(bigquery.system.query(query => 'SELECT * FROM `%s.%s`'))".formatted(projectId, table.getName())))
+            assertThat(query("SELECT * FROM TABLE(bigquery.system.query(query => 'SELECT * FROM `%s.%s`'))".formatted(projectId, table.getName()))).returnsEmptyResult();
+            assertThat(query("SELECT * FROM TABLE(bigquery.system.query(query => 'SELECT * FROM `%s.%s`'))".formatted(parentProjectId, table.getName())))
                     .failure()
                     .hasMessageContaining("Failed to get destination table for query");
         }
